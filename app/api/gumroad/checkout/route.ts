@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { createAccountToken } from "@/lib/gumroad/account-token";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { ApiError, assertSameOrigin, errorResponse, readJson } from "@/lib/http";
 
 const PRODUCT_URL = "https://scpforever.gumroad.com/l/arbvii";
 
@@ -15,17 +16,15 @@ const TIER_NAMES: Record<Tier, string> = {
 
 export async function POST(request: Request) {
   try {
-    const authorization = request.headers.get("authorization");
-    const accessToken = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
-    if (!accessToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const supabase = createSupabaseAdmin();
-    const { data, error } = await supabase.auth.getUser(accessToken);
-    if (error || !data.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const body = (await request.json()) as { tier?: Tier; recurrence?: Recurrence };
-    const tier: Tier = body.tier === "support" ? "support" : "regular";
-    const recurrence: Recurrence = body.recurrence === "yearly" ? "yearly" : "monthly";
+    assertSameOrigin(request);
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) throw new ApiError("UNAUTHORIZED", "Please sign in before upgrading.", 401);
+    const body = await readJson(request);
+    if (body.tier !== "regular" && body.tier !== "support") throw new ApiError("INVALID_TIER", "Choose a valid membership tier.");
+    if (body.recurrence !== "monthly" && body.recurrence !== "yearly") throw new ApiError("INVALID_RECURRENCE", "Choose monthly or yearly billing.");
+    const tier: Tier = body.tier;
+    const recurrence: Recurrence = body.recurrence;
 
     const accountToken = createAccountToken(data.user.id);
     const url = new URL(PRODUCT_URL);
@@ -36,9 +35,8 @@ export async function POST(request: Request) {
     url.searchParams.set("Account Token", accountToken);
     if (data.user.email) url.searchParams.set("email", data.user.email);
 
-    return NextResponse.json({ checkoutUrl: url.toString() });
+    return NextResponse.json({ checkoutUrl: url.toString() }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    console.error("Failed to create Gumroad checkout URL", error);
-    return NextResponse.json({ error: "Checkout unavailable" }, { status: 500 });
+    return errorResponse(error);
   }
 }

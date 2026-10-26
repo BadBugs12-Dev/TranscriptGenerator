@@ -1,3 +1,5 @@
+import "server-only";
+
 const API_BASE = "https://api.gumroad.com/v2";
 
 function accessToken() {
@@ -10,11 +12,11 @@ async function gumroadGet<T>(path: string): Promise<T> {
   const url = new URL(`${API_BASE}${path}`);
   url.searchParams.set("access_token", accessToken());
 
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Gumroad API ${response.status}`);
 
   const body = (await response.json()) as T & { success?: boolean };
-  if (body.success === false) throw new Error("Gumroad API request failed");
+  if (body.success !== true) throw new Error("Gumroad API request failed");
   return body;
 }
 
@@ -22,6 +24,7 @@ export type GumroadSale = {
   id: string;
   created_at: string;
   product_permalink: string;
+  product_id: string;
   product_name: string;
   email: string;
   price: number;
@@ -32,28 +35,39 @@ export type GumroadSale = {
   recurrence?: string | null;
   refunded?: boolean;
   disputed?: boolean;
+  dispute_won?: boolean;
   chargedback?: boolean;
+  chargebacked?: boolean;
+  access_revoked?: boolean;
+  partially_refunded?: boolean;
   ended?: boolean;
   cancelled?: boolean;
 };
 
 export type GumroadSubscriber = {
   id: string;
+  product_id: string;
   status: string;
+  purchase_ids?: string[];
   recurrence?: string | null;
   free_trial_ends_at?: string | null;
   cancelled_at?: string | null;
   ended_at?: string | null;
+  failed_at?: string | null;
 };
 
 export async function getSale(id: string) {
   const body = await gumroadGet<{ success: boolean; sale: GumroadSale }>(`/sales/${encodeURIComponent(id)}`);
+  if (!body.sale || body.sale.id !== id) throw new Error("Unexpected Gumroad sale response");
   return body.sale;
 }
 
 export async function getSubscriber(id: string) {
-  const body = await gumroadGet<{ success: boolean; subscriber: GumroadSubscriber }>(
+  const body = await gumroadGet<{ success: boolean; subscribers?: GumroadSubscriber; subscriber?: GumroadSubscriber }>(
     `/subscribers/${encodeURIComponent(id)}`,
   );
-  return body.subscriber;
+  // Gumroad's documented single-subscriber response uses the plural envelope.
+  const subscriber = body.subscribers ?? body.subscriber;
+  if (!subscriber || subscriber.id !== id) throw new Error("Unexpected Gumroad subscriber response");
+  return subscriber;
 }
