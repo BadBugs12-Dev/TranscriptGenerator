@@ -15,12 +15,12 @@ export function createAccountToken(userId: string) {
   return `${payload}.${signature}`;
 }
 
-export function verifyAccountToken(token: string): string | null {
+export function verifyAccountToken(token: string, atUnixSeconds = Math.floor(Date.now() / 1000)): string | null {
   const [userId, expiresAtRaw, signature] = token.split(".");
   if (!userId || !expiresAtRaw || !signature) return null;
 
   const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return null;
+  if (!Number.isFinite(expiresAt) || expiresAt < atUnixSeconds) return null;
 
   const payload = `${userId}.${expiresAtRaw}`;
   const expected = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
