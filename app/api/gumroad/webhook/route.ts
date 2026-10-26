@@ -42,13 +42,15 @@ function latestIso(a: string | null | undefined, b: string) {
 async function handleSale(saleId: string) {
   const sale = await getSale(saleId);
   if (sale.product_permalink !== PRODUCT_PERMALINK) throw new Error("Wrong Gumroad product");
-  if (sale.refunded || sale.disputed || sale.chargedback) throw new Error("Sale is not in good standing");
 
   const accountToken = sale.custom_fields?.[ACCOUNT_TOKEN_FIELD];
   if (!accountToken) throw new Error("Missing Account Token custom field");
 
-  const userId = verifyAccountToken(accountToken);
-  if (!userId) throw new Error("Invalid or expired Account Token");
+  const saleTime = Math.floor(new Date(sale.created_at).getTime() / 1000);
+  if (!Number.isFinite(saleTime)) throw new Error("Invalid Gumroad sale timestamp");
+
+  const userId = verifyAccountToken(accountToken, saleTime);
+  if (!userId) throw new Error("Invalid Account Token");
 
   const supabase = createSupabaseAdmin();
   const { data: profile, error: profileError } = await supabase
@@ -63,10 +65,13 @@ async function handleSale(saleId: string) {
 
   if (sale.subscription_id) {
     const subscriber = await getSubscriber(sale.subscription_id);
-    if (subscriber.free_trial_ends_at && new Date(subscriber.free_trial_ends_at).getTime() > Date.now()) {
+    if (subscriber.free_trial_ends_at && new Date(subscriber.free_trial_ends_at).getTime() > new Date(sale.created_at).getTime()) {
       periodEnd = subscriber.free_trial_ends_at;
     }
   }
+
+  const badStanding = Boolean(sale.refunded || sale.disputed || sale.chargedback);
+  const paymentStatus = sale.refunded ? "refunded" : sale.disputed ? "disputed" : sale.chargedback ? "chargeback" : "paid";
 
   const { error: paymentError } = await supabase.from("payments").upsert(
     {
@@ -75,7 +80,7 @@ async function handleSale(saleId: string) {
       payment_id: sale.id,
       amount: sale.price / 100,
       currency: (sale.currency || "USD").toUpperCase(),
-      status: "paid",
+      status: paymentStatus,
       purchased_at: sale.created_at,
       period_start: sale.created_at,
       period_end: periodEnd,
@@ -84,6 +89,20 @@ async function handleSale(saleId: string) {
   );
 
   if (paymentError) throw paymentError;
+
+  if (badStanding) {
+    if (sale.subscription_id) {
+      const subscriber = await getSubscriber(sale.subscription_id);
+      if (subscriber.ended_at) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ pro_expires_at: subscriber.ended_at, gumroad_subscription_id: sale.subscription_id })
+          .eq("user_id", userId);
+        if (error) throw error;
+      }
+    }
+    return;
+  }
 
   const { error: updateError } = await supabase
     .from("profiles")
