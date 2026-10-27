@@ -1,7 +1,6 @@
 import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { hasSupabaseConfig } from "@/lib/config";
 import { isProEntitlement, usageBoundaries } from "@/lib/usage-policy";
 export type Account = {
@@ -18,12 +17,11 @@ export const getAccount = cache(async (): Promise<Account> => {
     if (error && error.name !== "AuthSessionMissingError" && error.status !== 401 && error.status !== 403) throw error;
     return empty;
   }
-  const admin = createSupabaseAdmin();
   const boundary = usageBoundaries();
   const [profile, today, month] = await Promise.all([
-    admin.from("profiles").select("pro_expires_at,gumroad_subscription_id").eq("user_id",user.id).single(),
-    admin.from("transcript_usage").select("id",{head:true,count:"exact"}).eq("user_id",user.id).gte("created_at",boundary.day),
-    admin.from("transcript_usage").select("id",{head:true,count:"exact"}).eq("user_id",user.id).gte("created_at",boundary.month),
+    client.from("profiles").select("pro_expires_at,gumroad_subscription_id").eq("user_id",user.id).single(),
+    client.from("transcript_usage").select("id",{head:true,count:"exact"}).eq("user_id",user.id).gte("created_at",boundary.day),
+    client.from("transcript_usage").select("id",{head:true,count:"exact"}).eq("user_id",user.id).gte("created_at",boundary.month),
   ]);
   if (profile.error || today.error || month.error) throw profile.error || today.error || month.error;
   return {user:{id:user.id,email:user.email},isPro:isProEntitlement(profile.data.pro_expires_at),expiresAt:profile.data.pro_expires_at,subscriptionId:profile.data.gumroad_subscription_id,today:today.count??0,month:month.count??0};
