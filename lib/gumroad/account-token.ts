@@ -3,16 +3,20 @@ import crypto from "node:crypto";
 
 const TOKEN_TTL_SECONDS = 60 * 60;
 
-function secret() {
-  const value = process.env.GUMROAD_ACCOUNT_TOKEN_SECRET;
-  if (!value) throw new Error("Missing GUMROAD_ACCOUNT_TOKEN_SECRET");
-  return value;
+function secrets(): string[] {
+  const values = [
+    process.env.GUMROAD_ACCOUNT_TOKEN_SECRET,
+    process.env.APP_SIGNING_SECRET,
+  ].filter((value): value is string => Boolean(value));
+  const unique = [...new Set(values)];
+  if (!unique.length) throw new Error("Missing Gumroad account-token signing secret");
+  return unique;
 }
 
 export function createAccountToken(userId: string) {
   const expiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS;
   const payload = `${userId}.${expiresAt}`;
-  const signature = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+  const signature = crypto.createHmac("sha256", secrets()[0]).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
@@ -28,11 +32,12 @@ export function verifyAccountToken(token: string, atUnixSeconds = Math.floor(Dat
   if (atUnixSeconds < expiresAt - TOKEN_TTL_SECONDS - 300) return null;
 
   const payload = `${userId}.${expiresAtRaw}`;
-  const expected = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
+  const actual = Buffer.from(signature);
 
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  for (const signingSecret of secrets()) {
+    const expected = Buffer.from(crypto.createHmac("sha256", signingSecret).update(payload).digest("base64url"));
+    if (actual.length === expected.length && crypto.timingSafeEqual(actual, expected)) return userId;
+  }
 
-  return userId;
+  return null;
 }
