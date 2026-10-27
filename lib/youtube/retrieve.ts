@@ -15,9 +15,16 @@ const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const string = (value: unknown): string => typeof value === "string" ? value : "";
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
-// Fallback clients remain useful when PO-token initialization is unavailable or
-// YouTube is not enforcing the Web subtitles token for a particular request.
+// Try the TV client first. Current YouTube client policy does not require a
+// subtitles PO token for normal TVHTML5 requests, which makes it a useful
+// server-side path when Web caption requests are being blocked.
 const fallbackClients: Client[] = [
+  {
+    label: "tv",
+    id: "7",
+    userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)",
+    context: { clientName: "TVHTML5", clientVersion: "7.20260707.07.00", platform: "TV", hl: "en", gl: "US" },
+  },
   {
     label: "android",
     id: "3",
