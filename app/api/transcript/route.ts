@@ -5,7 +5,7 @@ import { getAccount } from "@/lib/account";
 import { hasSupabaseConfig } from "@/lib/config";
 import { ApiError, assertSameOrigin, errorResponse, readJson } from "@/lib/http";
 import { assertSigningConfigured, signState, verifyState } from "@/lib/signed-state";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 import { belowFreeLimits } from "@/lib/usage-policy";
 import { CaptionError, parseYouTubeUrl, retrieveTranscript } from "@/lib/youtube";
 export const runtime = "nodejs";
@@ -34,8 +34,10 @@ export async function POST(request: Request) {
     const result = await retrieveTranscript(url,body.language as string|undefined);
     let isPro = account.isPro;
     if (account.user && !sameTranscript) {
-      // Commit usage only after usable captions exist; the database rechecks quota atomically.
-      const {data,error} = await createSupabaseAdmin().rpc("record_transcript_success",{p_user_id:account.user.id,p_video_id:videoId});
+      // Commit usage only after usable captions exist; the database rechecks quota atomically
+      // using auth.uid() so this works with the normal authenticated session in Preview too.
+      const supabase = await createSupabaseClient();
+      const {data,error} = await supabase.rpc("record_own_transcript_success",{p_video_id:videoId});
       if (error) throw error;
       if (!data?.allowed) throw new ApiError("FREE_LIMIT_REACHED","You’ve reached your Free limit. Upgrade to Pro for unlimited transcripts.",429);
       isPro = data.is_pro;
