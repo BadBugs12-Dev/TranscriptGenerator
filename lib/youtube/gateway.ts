@@ -1,5 +1,6 @@
 import "server-only";
 import { CaptionError, type CaptionErrorCode } from "./errors";
+import { retrieveTranscriptViaInvidious } from "./invidious";
 import { retrieveTranscript as retrieveTranscriptLocal } from "./retrieve";
 import type { TranscriptResult } from "./types";
 
@@ -11,6 +12,11 @@ const captionErrorCodes = new Set<CaptionErrorCode>([
   "VIDEO_RESTRICTED",
   "NO_CAPTIONS",
   "LANGUAGE_UNAVAILABLE",
+  "YOUTUBE_BLOCKED",
+  "YOUTUBE_TIMEOUT",
+  "YOUTUBE_FAILURE",
+]);
+const invidiousFallbackCodes = new Set<CaptionErrorCode>([
   "YOUTUBE_BLOCKED",
   "YOUTUBE_TIMEOUT",
   "YOUTUBE_FAILURE",
@@ -115,7 +121,25 @@ async function retrieveRemote(endpoint: URL, input: string, language?: string): 
   }
 }
 
+async function retrieveLocalWithFallback(input: string, language?: string): Promise<TranscriptResult> {
+  if (language?.startsWith("iv:")) return retrieveTranscriptViaInvidious(input, language);
+
+  try {
+    return await retrieveTranscriptLocal(input, language);
+  } catch (error) {
+    if (!(error instanceof CaptionError) || !invidiousFallbackCodes.has(error.code)) throw error;
+    try {
+      return await retrieveTranscriptViaInvidious(input, language);
+    } catch (fallbackError) {
+      if (fallbackError instanceof CaptionError && ["NO_CAPTIONS", "LANGUAGE_UNAVAILABLE", "VIDEO_UNAVAILABLE", "VIDEO_RESTRICTED"].includes(fallbackError.code)) {
+        throw fallbackError;
+      }
+      throw error;
+    }
+  }
+}
+
 export async function retrieveTranscript(input: string, language?: string): Promise<TranscriptResult> {
   const endpoint = remoteEndpoint();
-  return endpoint ? retrieveRemote(endpoint, input, language) : retrieveTranscriptLocal(input, language);
+  return endpoint ? retrieveRemote(endpoint, input, language) : retrieveLocalWithFallback(input, language);
 }
