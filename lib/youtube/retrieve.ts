@@ -1,6 +1,6 @@
 import "server-only";
 import { CaptionError } from "./errors";
-import { createWebPoContext, type WebPoContext } from "./po-token";
+import type { WebPoContext } from "./po-token";
 import { parseYouTubeUrl } from "./url";
 import type { CaptionLanguage, TranscriptResult, TranscriptSegment } from "./types";
 
@@ -287,4 +287,9 @@ export function createCaptionRetriever(fetchImpl: typeof fetch, getWebPoContext?
   };
 }
 
-export const retrieveTranscript = createCaptionRetriever((...args) => fetch(...args), createWebPoContext);
+async function createWebPoContextLazy(videoId: string): Promise<WebPoContext> {
+  const { createWebPoContext } = await import("./po-token");
+  return createWebPoContext(videoId);
+}
+
+export const retrieveTranscript = createCaptionRetriever((...args) => fetch(...args), createWebPoContextLazy);
